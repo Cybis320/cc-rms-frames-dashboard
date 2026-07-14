@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RMS Station Frames</title>
+<style>
+  :root {
+    --bg: #0d1117; --tile: #161b22; --line: #30363d;
+    --text: #e6edf3; --muted: #8b949e;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .grid {
+    display: grid; gap: 10px; padding: 10px;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 700px)  { .grid { grid-template-columns: 1fr; } }
+
+  .tile {
+    position: relative; background: var(--tile); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden; cursor: zoom-in;
+    aspect-ratio: 16 / 9;
+  }
+  .tile:hover { border-color: #58a6ff; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile.empty img { display: none; }
+  .tile .placeholder {
+    display: none; position: absolute; inset: 0;
+    align-items: center; justify-content: center; color: var(--muted); font-size: 13px;
+  }
+  .tile.empty { cursor: default; }
+  .tile.empty .placeholder { display: flex; }
+
+  .bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: linear-gradient(transparent, rgba(0,0,0,.82));
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .id { font-weight: 600; letter-spacing: .04em; }
+  .age { color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+  .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+  /* full-res overlay */
+  #viewer {
+    position: fixed; inset: 0; background: rgba(0,0,0,.94);
+    display: none; flex-direction: column; z-index: 10;
+  }
+  #viewer.open { display: flex; }
+  #vbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); flex: none;
+  }
+  #vstage { flex: 1; overflow: auto; display: grid; place-items: center; }
+  #vstage.fit  img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #vstage.full img { max-width: none; max-height: none; cursor: grab; }
+  button {
+    background: #21262d; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  button:hover { border-color: #58a6ff; }
+  kbd {
+    background: #21262d; border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 5px; font: 11px ui-monospace, monospace; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RMS Station Frames</h1>
+  <span class="meta" id="hint"><kbd>click</kbd> a tile for full resolution</span>
+  <span class="spacer"></span>
+  <span class="meta" id="status">loading…</span>
+</header>
+
+<main class="grid" id="grid"></main>
+
+<div id="viewer">
+  <div id="vbar">
+    <strong id="vid"></strong>
+    <span class="meta" id="vname"></span>
+    <span class="spacer"></span>
+    <button id="vzoom">Actual size (1:1)</button>
+    <button id="vprev">← Prev</button>
+    <button id="vnext">Next →</button>
+    <button id="vclose">Close (Esc)</button>
+  </div>
+  <div id="vstage" class="fit"><img id="vimg" alt=""></div>
+</div>
+
+<script>
+const REFRESH_MS = 10000;
+const grid = document.getElementById('grid');
+let stations = [];   // latest payload
+let viewing = -1;    // index into stations, -1 = closed
+
+const ageText = (s) => {
+  if (s < 90) return `${Math.round(s)}s ago`;
+  if (s < 5400) return `${Math.round(s / 60)}m ago`;
+  return `${(s / 3600).toFixed(1)}h ago`;
+};
+// Stations capture on a stagger, so a few minutes of silence is normal.
+const ageClass = (s) => (s < 300 ? '' : s < 1800 ? 'warn' : 'bad');
+
+function render(payload) {
+  stations = payload;
+  grid.replaceChildren(...payload.map((st, i) => {
+    const tile = document.createElement('div');
+    tile.className = 'tile' + (st.online ? '' : ' empty');
+
+    const img = document.createElement('img');
+    if (st.online) {
+      img.src = `/thumb/${st.station}?v=${st.version}`;
+      img.alt = `${st.station} latest frame`;
+      img.loading = 'lazy';
+    }
+
+    const ph = document.createElement('div');
+    ph.className = 'placeholder';
+    ph.textContent = 'no frames found';
+
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const dot = document.createElement('span');
+    dot.className = 'dot ' + (st.online ? ageClass(st.age_seconds) : 'bad');
+    const id = document.createElement('span');
+    id.className = 'id';
+    id.textContent = st.station;
+    const age = document.createElement('span');
+    age.className = 'age';
+    age.textContent = st.online ? ageText(st.age_seconds) : 'offline';
+    bar.append(dot, id, age);
+
+    tile.append(img, ph, bar);
+    if (st.online) tile.onclick = () => openViewer(i);
+    return tile;
+  }));
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/latest', { cache: 'no-store' });
+    const { stations: payload } = await r.json();
+    render(payload);
+    document.getElementById('status').textContent =
+      'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('status').textContent = 'server unreachable — retrying';
+  }
+}
+
+// --- full-res viewer ---
+const viewer = document.getElementById('viewer');
+const vimg = document.getElementById('vimg');
+const vstage = document.getElementById('vstage');
+const vzoom = document.getElementById('vzoom');
+
+function openViewer(i) {
+  const st = stations[i];
+  if (!st || !st.online) return;
+  viewing = i;
+  vimg.src = `/full/${st.station}?v=${st.version}`;
+  document.getElementById('vid').textContent = st.station;
+  document.getElementById('vname').textContent = st.filename;
+  viewer.classList.add('open');
+}
+
+function closeViewer() {
+  viewing = -1;
+  viewer.classList.remove('open');
+  vimg.removeAttribute('src');  // drop the full-res bitmap
+  setFit(true);
+}
+
+function step(delta) {
+  if (viewing < 0) return;
+  const live = stations.map((s, i) => (s.online ? i : -1)).filter((i) => i >= 0);
+  if (!live.length) return;
+  const at = live.indexOf(viewing);
+  openViewer(live[(at + delta + live.length) % live.length]);
+}
+
+function setFit(fit) {
+  vstage.className = fit ? 'fit' : 'full';
+  vzoom.textContent = fit ? 'Actual size (1:1)' : 'Fit to window';
+}
+
+document.getElementById('vclose').onclick = closeViewer;
+document.getElementById('vprev').onclick = () => step(-1);
+document.getElementById('vnext').onclick = () => step(1);
+vzoom.onclick = () => setFit(vstage.className === 'full');
+
+document.addEventListener('keydown', (e) => {
+  if (viewing < 0) return;
+  if (e.key === 'Escape') closeViewer();
+  else if (e.key === 'ArrowLeft') step(-1);
+  else if (e.key === 'ArrowRight') step(1);
+  else if (e.key === 'f' || e.key === ' ') {
+    e.preventDefault();
+    setFit(vstage.className === 'full');
+  }
+});
+
+// Drag-to-pan when zoomed to 1:1.
+let drag = null;
+vstage.addEventListener('mousedown', (e) => {
+  if (vstage.className !== 'full') return;
+  drag = { x: e.pageX, y: e.pageY, l: vstage.scrollLeft, t: vstage.scrollTop };
+  e.preventDefault();
+});
+addEventListener('mouseup', () => { drag = null; });
+addEventListener('mousemove', (e) => {
+  if (!drag) return;
+  vstage.scrollLeft = drag.l - (e.pageX - drag.x);
+  vstage.scrollTop = drag.t - (e.pageY - drag.y);
+});
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
