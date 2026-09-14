@@ -62,7 +62,7 @@ Useful flags:
 | `--stations-csv` | `../stations.csv` | Station order/list; falls back to scanning `~/RMS_data` if absent |
 
 Pillow is the only dependency, and it is optional — without it the server just
-serves the original JPEGs and lets the browser scale them.
+serves the original images and lets the browser scale them.
 
 ## Using it
 
@@ -86,10 +86,12 @@ that station writes a new frame.
 `year/day/hour` and every level sorts chronologically by name, so it walks the
 newest branch downward and stops at the first level that yields a frame —
 a handful of directory listings rather than a full tree walk. Capture times come
-from the filename (`STATION_YYYYMMDD_HHMMSS_mmm_d.jpg`, UTC) rather than mtime,
-which survives file copies.
+from the filename (`STATION_YYYYMMDD_HHMMSS_mmm_d.png`, UTC) rather than mtime,
+which survives file copies. Both `.png` (current RMS) and `.jpg` (older builds)
+captures are recognised.
 
 `server.py` serves 640px thumbnails to the grid, cached in memory and keyed by
-path + mtime so a new capture invalidates its own entry. Full-resolution JPEGs
-are read from disk only when you actually open a tile, and images are addressed
-by station ID rather than by client-supplied path.
+path + mtime so a new capture invalidates its own entry. Thumbnails are always
+JPEG; the full-resolution image is read from disk in its original format (PNG
+or JPEG) only when you actually open a tile, and images are addressed by
+station ID rather than by client-supplied path.

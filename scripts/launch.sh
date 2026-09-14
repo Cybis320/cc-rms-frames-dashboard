@@ -19,7 +19,7 @@ notify() {
 }
 
 # Prefer the interpreter deploy.sh installed into (it has Pillow for fast
-# thumbnails); plain python3 still works, just serves full-size JPEGs.
+# thumbnails); plain python3 still works, just serves full-size images.
 PYTHON="${FRAMES_DASHBOARD_PYTHON:-}"
 if [ -z "$PYTHON" ]; then
     for cand in "$PROJECT_DIR/.venv/bin/python" "$HOME/vRMS/bin/python"; do

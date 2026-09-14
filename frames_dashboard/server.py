@@ -18,17 +18,26 @@ STATIC_DIR = Path(__file__).parent / "static"
 THUMB_WIDTH = 640
 THUMB_QUALITY = 82
 CACHE_SIZE = 24
+CONTENT_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def content_type_for(path: Path) -> str:
+    return CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
 
 
 class ThumbCache:
-    """Thumbnails keyed by (path, mtime) so a new capture invalidates itself."""
+    """Thumbnails keyed by (path, mtime) so a new capture invalidates itself.
+
+    Entries are (bytes, content_type): JPEG when Pillow renders the thumbnail,
+    otherwise the untouched source image in whatever format it came in.
+    """
 
     def __init__(self, maxsize: int = CACHE_SIZE) -> None:
-        self._entries: OrderedDict[tuple[str, float], bytes] = OrderedDict()
+        self._entries: OrderedDict[tuple[str, float], tuple[bytes, str]] = OrderedDict()
         self._lock = threading.Lock()
         self._maxsize = maxsize
 
-    def get(self, path: Path) -> bytes:
+    def get(self, path: Path) -> tuple[bytes, str]:
         key = (str(path), path.stat().st_mtime)
         with self._lock:
             hit = self._entries.get(key)
@@ -46,20 +55,21 @@ class ThumbCache:
         return data
 
     @staticmethod
-    def _render(path: Path) -> bytes:
+    def _render(path: Path) -> tuple[bytes, str]:
         try:
             from PIL import Image
         except ImportError:
             # No Pillow: hand back the original and let the browser scale it.
-            return path.read_bytes()
+            return path.read_bytes(), content_type_for(path)
 
         with Image.open(path) as img:
-            img.draft("RGB", (THUMB_WIDTH, THUMB_WIDTH))  # fast JPEG downscale
-            img = img.convert("RGB")
+            img.draft("RGB", (THUMB_WIDTH, THUMB_WIDTH))  # fast JPEG downscale; no-op for PNG
+            if img.mode not in ("RGB", "L"):  # keep 8-bit grayscale PNGs single-channel
+                img = img.convert("RGB")
             img.thumbnail((THUMB_WIDTH, THUMB_WIDTH * 2), Image.LANCZOS)
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=THUMB_QUALITY, optimize=True)
-        return buf.getvalue()
+        return buf.getvalue(), "image/jpeg"
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -125,8 +135,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if frame is None:
             self._send_error(404, f"no frames for {station!r}")
             return
-        data = frame.path.read_bytes() if full else self.cache.get(frame.path)
-        self._respond(200, "image/jpeg", data, cache=True)
+        if full:
+            data, content_type = frame.path.read_bytes(), content_type_for(frame.path)
+        else:
+            data, content_type = self.cache.get(frame.path)
+        self._respond(200, content_type, data, cache=True)
 
     def _send_static(self, name: str, content_type: str) -> None:
         target = STATIC_DIR / name

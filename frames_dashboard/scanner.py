@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-# RMS writes captures as STATION_YYYYMMDD_HHMMSS_mmm_d.jpg
+# RMS writes captures as STATION_YYYYMMDD_HHMMSS_mmm_d.png (older builds: .jpg).
+FRAME_SUFFIXES = {".png", ".jpg", ".jpeg"}
 FRAME_RE = re.compile(
-    r"^(?P<station>[A-Z0-9]+)_(?P<date>\d{8})_(?P<time>\d{6})_(?P<ms>\d{3})_\w+\.jpg$",
+    r"^(?P<station>[A-Z0-9]+)_(?P<date>\d{8})_(?P<time>\d{6})_(?P<ms>\d{3})_\w+\.(?:png|jpe?g)$",
     re.IGNORECASE,
 )
 
@@ -61,7 +62,7 @@ def discover_stations(data_root: Path, stations_csv: Path | None = None) -> list
 def _newest_frame_in(directory: Path) -> Frame | None:
     best: Frame | None = None
     for entry in directory.iterdir():
-        if not entry.is_file() or entry.suffix.lower() != ".jpg":
+        if not entry.is_file() or entry.suffix.lower() not in FRAME_SUFFIXES:
             continue
         captured = parse_capture_time(entry)
         if captured is None:
@@ -72,7 +73,7 @@ def _newest_frame_in(directory: Path) -> Frame | None:
 
 
 def latest_frame(data_root: Path, station: str) -> Frame | None:
-    """Newest jpg for a station.
+    """Newest capture (png or jpg) for a station.
 
     FramesFiles nests year/day/hour and every level sorts chronologically by
     name, so we walk the newest branch first and stop at the first level that
@@ -98,7 +99,7 @@ def latest_frame(data_root: Path, station: str) -> Frame | None:
         # Tolerate frames parked directly at this level.
         return _newest_frame_in(directory)
 
-    return descend(root, depth=3)  # year / day / hour / *.jpg
+    return descend(root, depth=3)  # year / day / hour / *.png
 
 
 def scan(data_root: Path, stations: list[str]) -> dict[str, Frame | None]:
