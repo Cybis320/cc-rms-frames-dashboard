@@ -2,13 +2,15 @@
 #
 # One-command installer for the RMS Frames Dashboard.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-frames-dashboard/master/scripts/deploy.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-frames-dashboard/master/install.sh | bash
 #       -- or, from a clone --
-#   ./scripts/deploy.sh
+#   ./install.sh
 #
+# This is the setup step install.sh runs; the old one-liner that curls this file
+# directly still works.
 # Idempotent: clones or updates the repo, installs the package into the RMS
-# virtualenv (or a local .venv), and installs the desktop launcher. Re-run it
-# any time to update.
+# virtualenv (or a local .venv), and installs the desktop launcher and the shared
+# hourly updater. Re-run it any time.
 #
 set -euo pipefail
 
@@ -30,33 +32,30 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../pyproject.toml" ] \
     info "Using existing checkout at $DEST"
 elif [ -d "$DEST/.git" ]; then
     info "Updating existing checkout at $DEST"
-    git -C "$DEST" pull --ff-only
+    git -C "$DEST" pull --ff-only \
+        || warn "Could not fast-forward $DEST (offline, or local changes); using it as is."
 else
     info "Cloning $REPO_URL -> $DEST"
     mkdir -p "$(dirname "$DEST")"
     git clone --depth 1 "$REPO_URL" "$DEST"
 fi
 
+CC_TOOL=frames_dashboard
+if [ ! -f "$DEST/cc-utils/lib.sh" ]; then
+    warn "$DEST predates this installer and could not be updated."
+    warn "See: git -C $DEST status   (then re-run this command)"
+    exit 1
+fi
+# shellcheck source=../cc-utils/lib.sh
+. "$DEST/cc-utils/lib.sh"
+
 # --- 2. Python environment --------------------------------------------------
 # Prefer the RMS virtualenv (it already has Pillow); otherwise make a local one.
-if [ -x "$VENV/bin/python" ]; then
-    PY="$VENV/bin/python"
-    info "Using virtualenv $VENV"
-else
-    warn "No virtualenv at $VENV; creating one at $DEST/.venv"
-    if ! python3 -m venv "$DEST/.venv"; then
-        rm -rf "$DEST/.venv"
-        warn "python3 -m venv failed (python3-venv not installed?). Either:"
-        warn "    sudo apt install python3-venv     # then re-run this installer"
-        warn "or point CC_VENV at an existing virtualenv and re-run."
-        exit 1
-    fi
-    PY="$DEST/.venv/bin/python"
-fi
-
-info "Installing package (+ Pillow, for fast thumbnails)"
-"$PY" -m pip install --quiet --upgrade pip
-"$PY" -m pip install --quiet -e "$DEST"
+# Pillow is only pip-installed when no copy (system python3-pil included) imports.
+CC_VENV="$VENV"
+PY="$(cc_python "$DEST")"
+info "Installing package into $PY"
+cc_pip_install "$PY" "$DEST" "PIL:Pillow"
 
 # --- 3. Desktop launcher -----------------------------------------------------
 if command -v xdg-user-dir >/dev/null 2>&1 || [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
@@ -66,8 +65,12 @@ else
     warn "Install it later from the desktop session:  $DEST/scripts/install-desktop.sh"
 fi
 
+# --- 4. Auto-update ----------------------------------------------------------
+cc_install_updater "$DEST/cc-utils"
+cc_mark_applied "$DEST"
+
 echo
 info "Done. Click the 'Frames Dashboard' icon, or run:"
 info "    $DEST/scripts/launch.sh"
 info "Dashboard: http://localhost:${FRAMES_DASHBOARD_PORT:-8420}"
-info "To update later, just re-run this installer (it git-pulls)."
+info "Updates arrive hourly (cc-utils updater)."

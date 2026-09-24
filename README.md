@@ -6,16 +6,23 @@ click-to-full-resolution.
 ## Install (one command)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-frames-dashboard/master/scripts/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-frames-dashboard/master/install.sh | bash
 ```
 
 Clones (or updates) the repo into `~/source/CC_Utils/frames_dashboard`,
 installs the package into the RMS virtualenv at `~/vRMS` (or a local `.venv`
 if there isn't one), and puts a **Frames Dashboard** icon on the Desktop and
-in the app menu. Idempotent — re-run the same command any time to update.
+in the app menu. Idempotent — re-run the same command any time.
+
+Updates install themselves: the installer schedules the shared hourly
+[cc-utils](cc-utils/README.md) updater (one crontab line, tagged
+`# cc-utils-update`). The older one-liner that curled `scripts/deploy.sh` still
+works.
+A dashboard server that was already running when an update landed is
+restarted on the next click of the icon.
 
 Overridable via environment: `CC_DEST` (checkout location), `CC_VENV`
-(virtualenv to install into), `CC_REPO_URL`.
+(virtualenv to install into), `CC_REPO_URL`, `CC_NO_AUTOUPDATE=1`.
 
 To uninstall:
 

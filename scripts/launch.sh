@@ -8,6 +8,7 @@ PORT="${FRAMES_DASHBOARD_PORT:-8420}"
 URL="http://localhost:${PORT}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="${XDG_STATE_HOME:-$HOME/.local/state}/frames-dashboard.log"
+MATCH="frames_dashboard --port ${PORT}"
 
 is_up() {
     # Any HTTP answer means something is already serving this port.
@@ -17,6 +18,16 @@ is_up() {
 notify() {
     command -v notify-send >/dev/null && notify-send "Frames Dashboard" "$1" || echo "$1" >&2
 }
+
+# A server started before an update (the hourly cc-utils updater) keeps running
+# the old code: restart it once the checkout has moved past the commit it
+# started on.
+REV_FILE="${LOG%.log}.rev"
+HEAD_REV="$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)"
+if [ -n "$HEAD_REV" ] && is_up && [ "$(cat "$REV_FILE" 2>/dev/null || true)" != "$HEAD_REV" ]; then
+    pkill -f "$MATCH" 2>/dev/null || true
+    for _ in $(seq 20); do is_up || break; sleep 0.2; done
+fi
 
 # Prefer the interpreter deploy.sh installed into (it has Pillow for fast
 # thumbnails); plain python3 still works, just serves full-size images.
@@ -36,6 +47,7 @@ if ! is_up; then
     cd "$PROJECT_DIR"
     nohup "$PYTHON" -m frames_dashboard --port "$PORT" >>"$LOG" 2>&1 &
     disown
+    printf '%s\n' "$HEAD_REV" >"$REV_FILE"
 
     # Give it a moment to bind before pointing a browser at it.
     for _ in $(seq 30); do
